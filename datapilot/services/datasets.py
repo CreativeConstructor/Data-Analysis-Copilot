@@ -89,6 +89,10 @@ def ingest_upload(owner, uploaded_file):
         profile = make_profile(frame)
         with transaction.atomic():
             dataset = Dataset.objects.create(owner=owner, original_filename=name[:255], storage_path=str(generated_path), row_count=len(frame), column_count=len(frame.columns), profile=profile)
+        # Indexing is best effort: missing Gemini credentials or a temporary
+        # embedding outage must not make an otherwise valid upload fail.
+        from .rag import index_dataset
+        index_dataset(dataset)
         return dataset
     except Exception:
         try:

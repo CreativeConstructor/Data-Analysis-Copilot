@@ -6,7 +6,7 @@ from .gemini import GeminiFailure, generate_code
 from .privacy import sanitize_text
 
 
-def analyze(question, schema, dataset_path, *, columns=None, history="", on_attempt=None):
+def analyze(question, schema, dataset_path, *, columns=None, history="", on_attempt=None, dataset=None):
     """Run one analysis and up to the configured number of code repairs.
 
     `on_attempt` is called after each completed attempt so a caller with a
@@ -14,6 +14,9 @@ def analyze(question, schema, dataset_path, *, columns=None, history="", on_atte
     history is also suitable for a Turn JSON field.
     """
     retry_limit = min(3, max(0, int(settings.ANALYSIS_MAX_RETRIES)))
+    if dataset is not None:
+        from .rag import build_schema_context
+        schema = build_schema_context(dataset, question)
     attempts = []
     previous_code = ""
     previous_error = ""
