@@ -13,8 +13,8 @@ class ExecutionFailure(Exception):
         self.retryable = retryable
         super().__init__(message)
 
-def execute(code, dataset_path):
-    errors = validate(code)
+def execute(code, dataset_path, columns=None):
+    errors = validate(code, columns=columns)
     if errors:
         raise ExecutionFailure("; ".join(e["message"] for e in errors), retryable=True)
     worker = Path(__file__).with_name("worker.py")
