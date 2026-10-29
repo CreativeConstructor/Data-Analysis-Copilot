@@ -24,3 +24,23 @@ class ColumnSchema(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=("dataset", "column_name"), name="unique_dataset_column_schema")]
+
+
+class Conversation(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="analysis_conversations")
+    dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE, related_name="conversations")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class Turn(models.Model):
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="turns")
+    question = models.TextField(max_length=2000)
+    code = models.TextField(blank=True)
+    status = models.CharField(max_length=20, default="pending")
+    insight = models.TextField(blank=True)
+    chart = models.JSONField(null=True, blank=True)
+    table = models.JSONField(null=True, blank=True)
+    attempts = models.JSONField(default=list)
+    error = models.CharField(max_length=300, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)

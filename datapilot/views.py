@@ -8,8 +8,12 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Dataset
+from .models import Conversation, Dataset, Turn
+from .serializers import AnalyzeSerializer
 from .services.datasets import delete_dataset, ingest_upload
+from .services.analysis import analyze
+from .services.results import format_result
+import json
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -46,6 +50,54 @@ class DatasetDetailView(APIView):
             dataset = get_object_or_404(Dataset.objects.select_for_update(), pk=pk, owner=request.user, deleting=False)
             delete_dataset(dataset)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AnalyzeView(APIView):
+    def post(self, request):
+        serializer = AnalyzeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        dataset = get_object_or_404(Dataset, pk=values["dataset_id"], owner=request.user, deleting=False)
+        conversation_id = values.get("conversation_id")
+        if conversation_id:
+            conversation = get_object_or_404(Conversation, pk=conversation_id, owner=request.user, dataset=dataset)
+        else:
+            conversation = Conversation.objects.create(owner=request.user, dataset=dataset)
+        prior = list(conversation.turns.exclude(status="pending").order_by("-created_at")[:2])
+        history = "\n".join(f"Question: {turn.question[:500]} Result: {str(turn.insight)[:300]}" for turn in reversed(prior))
+        turn = Turn.objects.create(conversation=conversation, question=values["question"])
+
+        def persist_attempt(attempt):
+            turn.attempts = [*turn.attempts, attempt]
+            turn.code = attempt.get("code", turn.code)
+            turn.save(update_fields=["attempts", "code"])
+
+        columns = [item.get("name", "") for item in dataset.profile.get("profile", [])]
+        outcome = analyze(values["question"], json.dumps(dataset.profile), dataset.storage_path,
+                          columns=columns, history=history, on_attempt=persist_attempt, dataset=dataset)
+        turn.status = outcome["status"]
+        turn.code = outcome["code"] or ""
+        turn.error = outcome["error"]
+        if outcome["status"] == "succeeded":
+            turn.table, turn.chart, turn.insight = format_result(outcome["result"])
+        turn.save()
+        payload = self._turn_payload(turn)
+        payload["conversation_id"] = str(conversation.pk)
+        return Response(payload, status=200 if turn.status == "succeeded" else 422)
+
+    @staticmethod
+    def _turn_payload(turn):
+        return {"id": str(turn.pk), "question": turn.question, "status": turn.status,
+                "insight": turn.insight, "chart": turn.chart, "table": turn.table,
+                "code": turn.code, "attempts": turn.attempts, "error": turn.error,
+                "created_at": turn.created_at}
+
+
+class ConversationDetailView(APIView):
+    def get(self, request, pk):
+        conversation = get_object_or_404(Conversation, pk=pk, owner=request.user)
+        return Response({"id": str(conversation.pk), "dataset_id": str(conversation.dataset_id),
+                         "turns": [AnalyzeView._turn_payload(turn) for turn in conversation.turns.order_by("created_at")]})
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
